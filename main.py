@@ -58,7 +58,7 @@ app.add_middleware(
 # Add root path handler
 @app.get("/")
 async def root():
-    return {"message": "Welcome to Audrey AI API dummy"}
+    return {"message": "Audrey AI API dummy"}
 
 
 # Add API routes
