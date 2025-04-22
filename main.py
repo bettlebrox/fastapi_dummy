@@ -23,6 +23,7 @@ load_dotenv()
 
 # Initialize FastAPI app
 app = FastAPI()
+logger.info("latest API codebase from github commit")
 logger.info(f"AZURE_OPENAI_ENDPOINT: {os.getenv('AZURE_OPENAI_ENDPOINT')}")
 logger.info(f"AZURE_OPENAI_API_KEY: {os.getenv('AZURE_OPENAI_API_KEY')}")
 logger.info(
