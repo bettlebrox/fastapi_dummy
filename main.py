@@ -1,14 +1,16 @@
-from fastapi import FastAPI, HTTPException, Request
-from fastapi.responses import RedirectResponse
-from sqlalchemy import create_engine, Column, Integer, String, Text
+from fastapi import FastAPI, HTTPException, Request, Depends
+from sqlalchemy import create_engine, Column, Integer, Text
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import sessionmaker
 import os
 from dotenv import load_dotenv
-import openai
+from openai import AzureOpenAI
 import logging
 import time
 from fastapi.middleware.cors import CORSMiddleware
+import httpx
+from auth import AuthError, get_current_user
+from fastapi.responses import JSONResponse
 
 # Configure logging
 logging.basicConfig(
@@ -21,26 +23,47 @@ load_dotenv()
 
 # Initialize FastAPI app
 app = FastAPI()
+logger.info(f"AZURE_OPENAI_ENDPOINT: {os.getenv('AZURE_OPENAI_ENDPOINT')}")
+logger.info(f"AZURE_OPENAI_API_KEY: {os.getenv('AZURE_OPENAI_API_KEY')}")
+logger.info(
+    f"AZURE_OPENAI_DEPLOYMENT_NAME: {os.getenv('AZURE_OPENAI_DEPLOYMENT_NAME')}"
+)
+logger.info(f"AZURE_OPENAI_MODEL_NAME: {os.getenv('AZURE_OPENAI_MODEL_NAME')}")
 
-# Add CORS middleware
+# Disable SSL certificate verification for the HTTP client
+http_client = httpx.Client(verify=False)
+
+# Azure OpenAI setup
+client = AzureOpenAI(
+    api_key=os.getenv("AZURE_OPENAI_API_KEY"),
+    azure_endpoint=os.getenv("AZURE_OPENAI_ENDPOINT"),
+    api_version="2024-12-01-preview",
+    azure_deployment=os.getenv("AZURE_OPENAI_DEPLOYMENT_NAME"),
+    http_client=http_client,
+)
+model_name = os.getenv("AZURE_OPENAI_MODEL_NAME")
+deployment_name = os.getenv("AZURE_OPENAI_DEPLOYMENT_NAME")
+logger.info(f"Azure OpenAI configured with deployment: {deployment_name}")
+
+# Configure CORS
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # Allows all origins
+    allow_origins=os.getenv("CORS_ORIGINS").split(","),
     allow_credentials=True,
-    allow_methods=["*"],  # Allows all methods
-    allow_headers=["*"],  # Allows all headers
+    allow_methods=["*"],
+    allow_headers=["*"],
 )
 
 
 # Add root path handler
 @app.get("/")
 async def root():
-    return {"message": "Welcome to Audrey AI API"}
+    return {"message": "Welcome to Audrey AI API placeholder"}
 
 
 # Add API routes
 @app.post("/api/chat")
-async def chat(message: str):
+async def chat(message: str, current_user: dict = Depends(get_current_user)):
     logger.info(f"Received chat request with message: {message}")
     try:
         # Store message in database
@@ -50,8 +73,8 @@ async def chat(message: str):
         db.commit()
 
         # Get response from Azure OpenAI
-        response = openai.chat.completions.create(
-            model=deployment_name,
+        response = client.chat.completions.create(
+            model=model_name,
             messages=[
                 {"role": "system", "content": "You are a helpful assistant."},
                 {"role": "user", "content": message},
@@ -113,14 +136,6 @@ class Message(Base):
 Base.metadata.create_all(bind=engine)
 logger.info("Database tables created successfully")
 
-# Azure OpenAI setup
-openai.api_type = "azure"
-openai.api_key = os.getenv("AZURE_OPENAI_API_KEY")
-openai.api_base = os.getenv("AZURE_OPENAI_ENDPOINT")
-openai.api_version = "2023-05-15"
-deployment_name = os.getenv("AZURE_OPENAI_DEPLOYMENT_NAME")
-logger.info(f"Azure OpenAI configured with deployment: {deployment_name}")
-
 
 # Add HTTP logging middleware
 @app.middleware("http")
@@ -132,6 +147,12 @@ async def log_requests(request: Request, call_next):
         f"{request.method} {request.url.path} - Status: {response.status_code} - Time: {process_time:.2f}s"
     )
     return response
+
+
+# Add error handler for AuthError
+@app.exception_handler(AuthError)
+async def auth_error_handler(request, exc):
+    return JSONResponse(status_code=exc.status_code, content={"detail": exc.error})
 
 
 if __name__ == "__main__":
